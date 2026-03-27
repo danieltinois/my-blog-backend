@@ -1,28 +1,33 @@
 import { PrismaClient } from '@prisma/client';
 import express from 'express';
+import multer from 'multer';
+import path from 'path';
 
 const prisma = new PrismaClient();
 const router = express.Router();
 
-// 1. Rota POST: Salva o conteúdo do texto direto no banco, sem upload de arquivo físico
-router.post('/', async (req, res) => {
-  try {
-    const {
-      title,
-      publishedAt,
-      tags,
-      readingTime,
-      description,
-      id,
-      isFixed,
-      content,
-    } = req.body as any;
+const storage = multer.memoryStorage();
 
-    if (!content) {
-      return res
-        .status(400)
-        .json({ error: 'O conteúdo (content) do post é obrigatório' });
+const upload = multer({
+  storage,
+  fileFilter: (_req, file, cb) => {
+    if (path.extname(file.originalname).toLowerCase() !== '.md') {
+      return cb(new Error('Apenas arquivos .md são permitidos'));
     }
+    cb(null, true);
+  },
+});
+
+router.post('/', upload.single('file'), async (req, res) => {
+  try {
+    const { title, publishedAt, tags, readingTime, description, id, isFixed } =
+      req.body as any;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Arquivo .md é obrigatório' });
+    }
+
+    const fileContent = req.file.buffer.toString('utf8');
 
     const tagsArray = tags
       ? Array.isArray(tags)
@@ -38,7 +43,7 @@ router.post('/', async (req, res) => {
         tags: tagsArray.join(','),
         readingTime: readingTime ? Number(readingTime) : null,
         description: description || null,
-        content: content, // Salva o texto Markdown aqui!
+        content: fileContent,
         isFixed: isFixed === 'true' || isFixed === true,
       },
     });
@@ -91,7 +96,17 @@ router.get('/fixed-posts', async (req, res) => {
       where: { isFixed: true },
       take: 10,
       orderBy: { publishedAt: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        publishedAt: true,
+        tags: true,
+        readingTime: true,
+        description: true,
+        isFixed: true,
+      },
     });
+
     const result = fixedPosts.map(p => ({
       ...p,
       tags: p.tags
@@ -144,7 +159,12 @@ router.get('/search', async (req, res) => {
           { tags: { contains: search, mode: 'insensitive' } },
         ],
       },
-      select: { id: true, title: true, description: true, tags: true },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        tags: true,
+      },
     });
 
     return res.json({ data: posts });
@@ -168,15 +188,20 @@ router.get('/:id', async (req, res) => {
   return res.json({ ...post, tags: tagsArray });
 });
 
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', upload.single('file'), async (req, res) => {
   try {
     const id = req.params.id;
     const existing = await prisma.post.findUnique({ where: { id } });
+
     if (!existing)
       return res.status(404).json({ error: 'Post não encontrado' });
 
-    const { title, publishedAt, tags, readingTime, description, content } =
+    const { title, publishedAt, tags, readingTime, description } =
       req.body as any;
+
+    const newContent = req.file
+      ? req.file.buffer.toString('utf8')
+      : existing.content;
 
     const tagsArray = tags
       ? Array.isArray(tags)
@@ -196,7 +221,7 @@ router.patch('/:id', async (req, res) => {
             : existing.readingTime,
         description:
           description !== undefined ? description : existing.description,
-        content: content !== undefined ? content : existing.content,
+        content: newContent,
       },
     });
 
@@ -211,10 +236,12 @@ router.delete('/:id', async (req, res) => {
     const existing = await prisma.post.findUnique({
       where: { id: req.params.id },
     });
+
     if (!existing)
       return res.status(404).json({ error: 'Post não encontrado' });
 
     await prisma.post.delete({ where: { id: req.params.id } });
+
     return res.status(204).send();
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
