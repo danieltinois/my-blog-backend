@@ -9,23 +9,17 @@ const prisma = new PrismaClient();
 const router = express.Router();
 
 const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads');
-
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
-  destination: function (_req, _file, cb) {
-    cb(null, UPLOADS_DIR);
-  },
-  filename: function (_req, file, cb) {
-    const id = uuidv4();
-    const ext = path.extname(file.originalname);
-    cb(null, id + ext);
-  },
+  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+  filename: (_req, file, cb) =>
+    cb(null, uuidv4() + path.extname(file.originalname)),
 });
 
 const upload = multer({
   storage,
-  fileFilter: function (_req, file, cb) {
+  fileFilter: (_req, file, cb) => {
     if (path.extname(file.originalname).toLowerCase() !== '.md') {
       return cb(new Error('Apenas arquivos .md são permitidos'));
     }
@@ -33,40 +27,19 @@ const upload = multer({
   },
 });
 
-// Create post
 router.post('/', upload.single('file'), async (req, res) => {
   try {
-    const { title, publishedAt, tags, readingTime, description, id } =
+    const { title, publishedAt, tags, readingTime, description, id, isFixed } =
       req.body as any;
     if (!req.file)
       return res.status(400).json({ error: 'Arquivo .md é obrigatório' });
-
-    if (!title)
-      return (
-        fs.unlinkSync(req.file.path),
-        res.status(400).json({ error: 'Título é obrigatório' })
-      );
-
-    if (!tags) {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'Tag é obrigatória' });
-    }
-
-    if (!readingTime) {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'Tempo de leitura é obrigatório' });
-    }
-
-    if (!description) {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'Descrição é obrigatória' });
-    }
 
     const tagsArray = tags
       ? Array.isArray(tags)
         ? tags
         : tags.split(',').map((t: string) => t.trim())
       : [];
+
     const post = await prisma.post.create({
       data: {
         id: id || undefined,
@@ -76,35 +49,95 @@ router.post('/', upload.single('file'), async (req, res) => {
         readingTime: readingTime ? Number(readingTime) : null,
         description: description || null,
         filePath: `/uploads/${req.file.filename}`,
+        isFixed: isFixed === 'true' || isFixed === true,
       },
     });
 
-    const result = { ...post, tags: tagsArray };
-    return res.status(201).json(result);
+    return res.status(201).json({ ...post, tags: tagsArray });
   } catch (err: any) {
-    // delete uploaded file
-    if (req.file) {
-      fs.unlinkSync(req.file.path);
-    }
-    console.error(err);
+    if (req.file) fs.unlinkSync(req.file.path);
     return res.status(500).json({ error: err.message });
   }
 });
 
-// Read post with all info
+router.get('/', async (req, res) => {
+  const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
+  const limit = Math.max(1, parseInt((req.query.limit as string) || '10', 10));
+  const skip = (page - 1) * limit;
+
+  const [total, posts] = await Promise.all([
+    prisma.post.count(),
+    prisma.post.findMany({
+      orderBy: [{ isFixed: 'desc' }, { publishedAt: 'desc' }], // Fixados no topo
+      skip,
+      take: limit,
+    }),
+  ]);
+
+  const list = posts.map((p: any) => ({
+    ...p,
+    tags: p.tags
+      ? p.tags
+          .split(',')
+          .map((t: string) => t.trim())
+          .filter(Boolean)
+      : [],
+  }));
+
+  res.json({ data: list, page, limit, total });
+});
+
+router.get('/fixed-posts', async (req, res) => {
+  try {
+    const fixedPosts = await prisma.post.findMany({
+      where: { isFixed: true },
+      take: 10,
+      orderBy: { publishedAt: 'desc' },
+    });
+    const result = fixedPosts.map(p => ({
+      ...p,
+      tags: p.tags
+        ? p.tags
+            .split(',')
+            .map((t: string) => t.trim())
+            .filter(Boolean)
+        : [],
+    }));
+
+    return res.json({ data: result });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Rota para Alternar o status de fixado (Toggle)
+router.patch('/:id/fixed', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const existing = await prisma.post.findUnique({ where: { id } });
+    if (!existing)
+      return res.status(404).json({ error: 'Post não encontrado' });
+
+    const updatedPost = await prisma.post.update({
+      where: { id },
+      data: { isFixed: !existing.isFixed },
+    });
+
+    return res.json({
+      message: updatedPost.isFixed ? 'Post fixado' : 'Post desfixado',
+      post: updatedPost,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   const post = await prisma.post.findUnique({ where: { id: req.params.id } });
   if (!post) return res.status(404).json({ error: 'Post não encontrado' });
 
   const mdPath = path.join(__dirname, '..', '..', post.filePath);
-  let content: string | null = null;
-  try {
-    content = fs.readFileSync(mdPath, 'utf8');
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: 'Erro ao ler o arquivo' });
-  }
-
+  const content = fs.readFileSync(mdPath, 'utf8');
   const tagsArray = post.tags
     ? post.tags
         .split(',')
@@ -115,120 +148,62 @@ router.get('/:id', async (req, res) => {
   return res.json({ ...post, tags: tagsArray, content });
 });
 
-// Find all (limited fields) with pagination
-router.get('/', async (req: express.Request, res: express.Response) => {
-  const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
-  const limit = Math.max(1, parseInt((req.query.limit as string) || '10', 10));
-  const skip = (page - 1) * limit;
-
-  const [total, posts] = await Promise.all([
-    prisma.post.count(),
-    prisma.post.findMany({
-      orderBy: { publishedAt: 'desc' },
-      skip,
-      take: limit,
-    }),
-  ]);
-
-  const list = posts.map((p: any) => ({
-    id: p.id,
-    title: p.title,
-    publishedAt: p.publishedAt,
-    tags: p.tags
-      ? p.tags
-          .split(',')
-          .map((t: string) => t.trim())
-          .filter(Boolean)
-      : [],
-    description: p.description,
-  }));
-
-  res.json({ data: list, page, limit, total });
-});
-
-// Update post (metadata and optional file replacement)
-router.patch(
-  '/:id',
-  upload.single('file'),
-  async (req: express.Request, res: express.Response) => {
-    try {
-      const { title, publishedAt, tags, readingTime, description } =
-        req.body as any;
-      const id = req.params.id;
-
-      const existing = await prisma.post.findUnique({ where: { id } });
-      if (!existing)
-        return res.status(404).json({ error: 'Post não encontrado' });
-
-      // handle file replacement
-      let newFilePath = existing.filePath;
-      if (req.file) {
-        const oldPath = path.join(__dirname, '..', '..', existing.filePath);
-        try {
-          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-        } catch (e) {
-          // ignore unlink errors
-        }
-        newFilePath = `/uploads/${req.file.filename}`;
-      }
-
-      const tagsArray = tags
-        ? Array.isArray(tags)
-          ? tags
-          : tags.split(',').map((t: string) => t.trim())
-        : existing.tags
-          ? existing.tags
-              .split(',')
-              .map((t: string) => t.trim())
-              .filter(Boolean)
-          : [];
-
-      const updated = await prisma.post.update({
-        where: { id },
-        data: {
-          title: title || existing.title,
-          publishedAt: publishedAt
-            ? new Date(publishedAt)
-            : existing.publishedAt,
-          tags: tagsArray.join(','),
-          readingTime:
-            readingTime !== undefined
-              ? Number(readingTime)
-              : existing.readingTime,
-          description:
-            description !== undefined ? description : existing.description,
-          filePath: newFilePath,
-        },
-      });
-
-      return res.json({ ...updated, tags: tagsArray });
-    } catch (err: any) {
-      console.error(err);
-      return res.status(500).json({ error: err.message });
-    }
-  }
-);
-
-// Delete post and its markdown file
-router.delete('/:id', async (req: express.Request, res: express.Response) => {
+router.patch('/:id', upload.single('file'), async (req, res) => {
   try {
     const id = req.params.id;
     const existing = await prisma.post.findUnique({ where: { id } });
     if (!existing)
       return res.status(404).json({ error: 'Post não encontrado' });
 
-    // delete file
-    const mdPath = path.join(__dirname, '..', '..', existing.filePath);
-    try {
-      if (fs.existsSync(mdPath)) fs.unlinkSync(mdPath);
-    } catch (e) {
-      // ignore unlink errors
+    let newFilePath = existing.filePath;
+    if (req.file) {
+      const oldPath = path.join(__dirname, '..', '..', existing.filePath);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      newFilePath = `/uploads/${req.file.filename}`;
     }
 
-    await prisma.post.delete({ where: { id } });
+    const { title, publishedAt, tags, readingTime, description } =
+      req.body as any;
+    const tagsArray = tags
+      ? Array.isArray(tags)
+        ? tags
+        : tags.split(',').map((t: string) => t.trim())
+      : existing.tags.split(',');
+
+    const updated = await prisma.post.update({
+      where: { id },
+      data: {
+        title: title || existing.title,
+        publishedAt: publishedAt ? new Date(publishedAt) : existing.publishedAt,
+        tags: Array.isArray(tagsArray) ? tagsArray.join(',') : existing.tags,
+        readingTime:
+          readingTime !== undefined
+            ? Number(readingTime)
+            : existing.readingTime,
+        description:
+          description !== undefined ? description : existing.description,
+        filePath: newFilePath,
+      },
+    });
+
+    return res.json(updated);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const existing = await prisma.post.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!existing)
+      return res.status(404).json({ error: 'Post não encontrado' });
+    const mdPath = path.join(__dirname, '..', '..', existing.filePath);
+    if (fs.existsSync(mdPath)) fs.unlinkSync(mdPath);
+    await prisma.post.delete({ where: { id: req.params.id } });
     return res.status(204).send();
   } catch (err: any) {
-    console.error(err);
     return res.status(500).json({ error: err.message });
   }
 });

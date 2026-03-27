@@ -16,4 +16,5 @@ model Post {
   readingTime Int?
   description String?
   filePath    String
+  isFixed     Boolean @default(false)
 }
