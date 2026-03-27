@@ -132,6 +132,33 @@ router.patch('/:id/fixed', async (req, res) => {
   }
 });
 
+router.get('/search', async (req, res) => {
+  try {
+    const search = req.query.q as string;
+    if (!search) {
+      return res.status(400).json({ error: 'Query string is required' });
+    }
+
+    const posts = await prisma.post.findMany({
+      where: {
+        OR: [
+          { title: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+          { tags: { contains: search, mode: 'insensitive' } },
+        ],
+      },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        tags: true,
+      },
+    });
+
+    return res.json({ data: posts });
+  } catch (err: any) {}
+});
+
 router.get('/:id', async (req, res) => {
   const post = await prisma.post.findUnique({ where: { id: req.params.id } });
   if (!post) return res.status(404).json({ error: 'Post não encontrado' });
