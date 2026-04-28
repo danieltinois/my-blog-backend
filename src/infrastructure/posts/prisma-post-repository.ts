@@ -57,9 +57,11 @@ export class PrismaPostRepository implements PostRepository {
           { tags: { contains: query, mode: 'insensitive' } },
         ],
       },
+      orderBy: {publishedAt: 'desc'},
       select: {
         id: true,
         title: true,
+        publishedAt: true,
         description: true,
         tags: true,
       },
