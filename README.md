@@ -4,9 +4,15 @@ Simple backend for a personal blog (Express + TypeScript + Prisma).
 
 ## Features
 
-- REST endpoints for posts under `/posts` (see `src/routes/posts.ts`).
+- REST endpoints for posts under `/posts`.
 - Static file serving for uploaded markdown files at `/uploads`.
-- Uses Prisma for a local SQLite database (`prisma/dev.db`).
+- Uses Prisma with the database configured in `DATABASE_URL`.
+- Organized with a Clean Architecture inspired structure:
+  - `domain`: entities and contracts
+  - `application`: business rules and use cases
+  - `infrastructure`: Prisma implementation
+  - `presentation`: controllers and HTTP middleware
+  - `main`: dependency wiring
 
 ## Prerequisites
 
@@ -48,7 +54,7 @@ The server listens on `http://localhost:3000` by default (set `PORT` to change).
 
 - GET /posts — list posts
 - GET /posts/:id — get a single post
-- POST /posts — create a post (check `src/routes/posts.ts` for request shape)
+- POST /posts — create a post
 - Static uploads are served at `/uploads` (files stored in the `uploads/` folder)
 
 ## Notes
