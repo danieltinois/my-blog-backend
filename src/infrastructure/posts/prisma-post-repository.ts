@@ -48,7 +48,19 @@ export class PrismaPostRepository implements PostRepository {
     });
   }
 
-  search(query: string) {
+  countSearch(query: string) {
+    return prisma.post.count({
+      where: {
+        OR: [
+          { title: { contains: query, mode: 'insensitive' } },
+          { description: { contains: query, mode: 'insensitive' } },
+          { tags: { contains: query, mode: 'insensitive' } },
+        ]
+      }
+    })
+  }
+
+  search(query: string, params: { skip: number; take: number }) {
     return prisma.post.findMany({
       where: {
         OR: [
@@ -58,6 +70,8 @@ export class PrismaPostRepository implements PostRepository {
         ],
       },
       orderBy: {publishedAt: 'desc'},
+      skip: params.skip,
+      take: params.take,
       select: {
         id: true,
         title: true,

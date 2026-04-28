@@ -25,7 +25,8 @@ export interface PostRepository {
   count(): Promise<number>;
   findMany(params: { skip: number; take: number }): Promise<PostListItem[]>;
   findFixed(limit: number): Promise<PostListItem[]>;
-  search(query: string): Promise<
+  countSearch(query: string): Promise<number>;
+  search(query: string, params: {skip: number; take: number}): Promise<
     Array<Pick<PostEntity, 'id' | 'title' | 'description' | 'tags' | 'publishedAt'>>
   >;
   findById(id: string): Promise<PostEntity | null>;
