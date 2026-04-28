@@ -73,13 +73,26 @@ export class PostService {
     };
   }
 
-  async search(query?: string) {
+  async search(query: string | undefined, page: number, limit: number) {
     if (!query) {
       throw new AppError('Query string is required');
     }
 
-    const posts = await this.postRepository.search(query);
-    return { data: posts };
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.max(1, limit);
+    const skip = (safePage - 1) * safeLimit;
+
+    const [total, posts] = await Promise.all([
+      this.postRepository.countSearch(query),
+      this.postRepository.search(query, { skip, take: safeLimit }),
+    ]);
+
+    return {
+      data: posts,
+      page: safePage,
+      limit: safeLimit,
+      total,
+    };
   }
 
   async getById(id: string) {

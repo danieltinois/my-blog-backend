@@ -61,7 +61,14 @@ export class PostsController {
 
   search = async (req: Request, res: Response) => {
     return this.handle(res, async () => {
-      const response = await this.postService.search(req.query.q as string | undefined);
+      const page = parseInt((req.query.page as string) || '1', 10);
+      const limit = parseInt((req.query.limit as string) || '10', 10);
+      const response = await this.postService.search(
+          req.query.q as string | undefined,
+          page,
+          limit
+      );
+
       return res.json(response);
     });
   };
